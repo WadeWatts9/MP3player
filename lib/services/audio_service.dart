@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:just_audio/just_audio.dart';
 import '../models/song.dart';
 
@@ -6,37 +7,45 @@ class AudioService {
   Song? _currentSong;
   bool _isInitialized = false;
   bool _isBuffering = false;
+  List<StreamSubscription> _subscriptions = [];
 
   Future<void> initialize() async {
     if (!_isInitialized) {
       await _audioPlayer.setLoopMode(LoopMode.off);
-      _audioPlayer.playbackEventStream.listen((event) {
-        if (event.processingState == ProcessingState.buffering) {
-          _isBuffering = true;
-        } else {
-          _isBuffering = false;
-        }
-      });
+      _subscriptions.add(
+        _audioPlayer.playbackEventStream.listen((event) {
+          if (event.processingState == ProcessingState.buffering) {
+            _isBuffering = true;
+          } else {
+            _isBuffering = false;
+          }
+        })
+      );
       _isInitialized = true;
     }
   }
 
   Future<void> play(Song song) async {
-    if (_currentSong?.url != song.url) {
-      _currentSong = song;
-      final audioSource = AudioSource.uri(
-        Uri.parse(song.url),
-      );
+    try {
+      if (_currentSong?.url != song.url) {
+        _currentSong = song;
+        final audioSource = AudioSource.uri(
+          Uri.parse(song.url),
+        );
 
-      await _audioPlayer.setAudioSource(
-        audioSource,
-        preload: true,
-        initialPosition: Duration.zero,
-      );
-    }
+        await _audioPlayer.setAudioSource(
+          audioSource,
+          preload: true,
+          initialPosition: Duration.zero,
+        );
+      }
 
-    if (!_isBuffering) {
-      await _audioPlayer.play();
+      if (!_isBuffering) {
+        await _audioPlayer.play();
+      }
+    } catch (e) {
+      print('Error playing song: $e');
+      rethrow;
     }
   }
 
@@ -53,6 +62,10 @@ class AudioService {
   }
 
   Future<void> dispose() async {
+    for (var subscription in _subscriptions) {
+      await subscription.cancel();
+    }
+    _subscriptions.clear();
     await _audioPlayer.dispose();
   }
 
@@ -62,6 +75,11 @@ class AudioService {
       if (parts.length == 2) {
         final minutes = int.parse(parts[0]);
         final seconds = int.parse(parts[1]);
+        
+        if (minutes < 0 || seconds < 0 || seconds > 59) {
+          return null;
+        }
+        
         return Duration(minutes: minutes, seconds: seconds);
       }
     } catch (e) {

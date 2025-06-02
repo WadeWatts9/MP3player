@@ -59,7 +59,8 @@ Este proyecto está licenciado bajo la Licencia MIT - ver el archivo [LICENSE](L
 
 ## Contribuidores
 
-- [Tu Nombre] - Desarrollador principal
+- Alan Canto - Desarrollador principal
+- Walter Ramos - Desarrollador principal
 
 ## Agradecimientos
 

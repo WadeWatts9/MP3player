@@ -11,6 +11,10 @@ Una aplicación móvil desarrollada en Flutter para reproducir música MP3 con l
 - Gestión de descargas en segundo plano
 - Manejo de errores y reconexión automática
 
+## Video Demo de funcionamiento
+
+- [Video Demo de funcionamiento](https://youtu.be/6RYIQEuyTdc)
+
 ## Requisitos
 
 - Flutter SDK >= 3.2.3

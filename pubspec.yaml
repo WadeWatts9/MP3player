@@ -11,10 +11,13 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.6
   just_audio: ^0.9.36
-  http: ^1.1.2
+  just_audio_background: ^0.0.1-beta.11
+  http: ^1.2.0
   provider: ^6.1.1
   workmanager: ^0.5.2
   flutter_cache_manager: ^3.3.1
+  permission_handler: ^11.1.0
+  path_provider: ^2.1.1
 
 dev_dependencies:
   flutter_test:

@@ -1,4 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import '../models/song.dart';
 import '../services/audio_service.dart';
 import '../services/download_service.dart';
@@ -14,24 +17,45 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final DownloadService _downloadService = DownloadService();
   final AudioService _audioService = AudioService();
-  final BackgroundService _backgroundService = BackgroundService();
+  late final BackgroundService _backgroundService;
   List<Song> _songs = [];
   bool _isLoading = true;
   String? _error;
+  Song? _currentPlayingSong;
   Duration _currentPosition = Duration.zero;
   Duration? _totalDuration;
   bool _isBuffering = false;
+  bool _isPlaying = false;
+
+  final Map<String, StreamSubscription<FileResponse>> _downloadSubscriptions = {};
+  final Map<String, double> _downloadProgress = {};
+  final Map<String, bool> _isDownloaded = {};
 
   @override
   void initState() {
     super.initState();
+    _backgroundService = BackgroundService();
+    _requestPermissions();
     _initializeApp();
     _setupAudioListeners();
   }
 
+  @override
+  void dispose() {
+    _audioService.dispose();
+    _downloadSubscriptions.forEach((key, subscription) => subscription.cancel());
+    super.dispose();
+  }
+
+  Future<void> _requestPermissions() async {
+    if (await Permission.notification.isDenied) {
+      await Permission.notification.request();
+    }
+  }
+
   void _setupAudioListeners() {
     _audioService.positionStream.listen((position) {
-      if (position != null) {
+      if (mounted) {
         setState(() {
           _currentPosition = position;
         });
@@ -39,51 +63,137 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     _audioService.durationStream.listen((duration) {
-      setState(() {
-        _totalDuration = duration;
-      });
+      if (mounted) {
+        setState(() {
+          _totalDuration = duration;
+        });
+      }
     });
 
     _audioService.bufferingStream.listen((buffering) {
-      setState(() {
-        _isBuffering = buffering;
-      });
+      if (mounted) {
+        setState(() {
+          _isBuffering = buffering;
+        });
+      }
+    });
+
+    _audioService.playerStateStream.listen((playerState) {
+      if (mounted) {
+        setState(() {
+          _isPlaying = playerState.playing;
+        });
+      }
+    });
+
+    _audioService.currentSongStream.listen((song) {
+      if (mounted) {
+        setState(() {
+          _currentPlayingSong = song;
+        });
+      }
     });
   }
 
   Future<void> _initializeApp() async {
+    if (mounted) setState(() => _isLoading = true);
     try {
       await _audioService.initialize();
       await _backgroundService.initialize();
       final songs = await _downloadService.fetchPlaylist();
-      setState(() {
-        _songs = songs;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _songs = songs;
+          _isLoading = false;
+        });
+        for (var song in songs) {
+          _checkIfDownloaded(song);
+        }
+      }
     } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _checkIfDownloaded(Song song) async {
+    final file = await _backgroundService.getCachedFile(song.url);
+    if (mounted) {
       setState(() {
-        _error = e.toString();
-        _isLoading = false;
+        _isDownloaded[song.url] = file != null && file.existsSync();
+        if (_isDownloaded[song.url] == true) _downloadProgress[song.url] = 1.0;
       });
     }
   }
 
-  Future<void> _downloadSong(Song song) async {
-    try {
-      await _backgroundService.scheduleDownload(song);
-      await _downloadService.downloadSong(
-        song,
-        (progress) {
-          setState(() {
-            song.downloadProgress = progress;
-          });
-        },
-      );
-    } catch (e) {
+  Future<void> _startOrPlaySong(Song song) async {
+    final isSongDownloaded = _isDownloaded[song.url] ?? false;
+
+    if (isSongDownloaded) {
+      await _audioService.play(song);
+    } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error al descargar: $e')),
+        SnackBar(content: Text('Iniciando descarga de ${song.title}...')),
       );
+      _scheduleDownload(song);
+      await _audioService.play(song);
     }
+    if (mounted) setState(() {});
+  }
+
+  void _scheduleDownload(Song song) {
+    if (_downloadProgress[song.url] != null && _downloadProgress[song.url]! > 0 && _downloadProgress[song.url]! < 1) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${song.title} ya se está descargando.')));
+      return;
+    }
+
+    _backgroundService.scheduleDownload(song);
+    if (mounted) {
+      setState(() {
+        _downloadProgress[song.url] = 0.001;
+        _isDownloaded[song.url] = false;
+      });
+    }
+
+    _downloadSubscriptions[song.url]?.cancel();
+    _downloadSubscriptions[song.url] = _backgroundService.getDownloadProgressStream(song.url).listen(
+      (fileResponse) {
+        if (fileResponse is DownloadProgress) {
+          if (mounted) {
+            setState(() {
+              _downloadProgress[song.url] = (fileResponse.downloaded / (fileResponse.totalSize ?? fileResponse.downloaded)).toDouble();
+              _isDownloaded[song.url] = false;
+            });
+          }
+        } else if (fileResponse is FileInfo) {
+          if (mounted) {
+            setState(() {
+              _downloadProgress[song.url] = 1.0;
+              _isDownloaded[song.url] = true;
+            });
+          }
+          _downloadSubscriptions[song.url]?.cancel();
+        }
+      },
+      onError: (error) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error descargando ${song.title}: $error')),
+          );
+          setState(() {
+            _downloadProgress.remove(song.url);
+            _isDownloaded[song.url] = false;
+          });
+        }
+      },
+      onDone: () {
+        _checkIfDownloaded(song);
+      }
+    );
   }
 
   String _formatDuration(Duration duration) {
@@ -93,14 +203,50 @@ class _HomeScreenState extends State<HomeScreen> {
     return '$minutes:$seconds';
   }
 
+  Widget _buildSongListItem(Song song, ThemeData theme) {
+    final bool isCurrentlyPlaying = _currentPlayingSong?.url == song.url;
+    final double progress = _downloadProgress[song.url] ?? 0.0;
+    final bool downloaded = _isDownloaded[song.url] ?? false;
+
+    Widget trailingWidget;
+    if (downloaded) {
+      trailingWidget = Icon(Icons.check_circle, color: Colors.green, size: 30);
+    } else if (progress > 0 && progress < 1) {
+      trailingWidget = SizedBox(
+        width: 30, height: 30,
+        child: CircularProgressIndicator(value: progress, strokeWidth: 3)
+      );
+    } else {
+      trailingWidget = IconButton(
+        icon: Icon(Icons.download_for_offline, size: 30, color: theme.colorScheme.primary),
+        onPressed: () => _scheduleDownload(song),
+      );
+    }
+
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      elevation: isCurrentlyPlaying ? 4 : 2,
+      margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+      color: isCurrentlyPlaying ? theme.colorScheme.primaryContainer.withOpacity(0.5) : theme.cardColor,
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: theme.colorScheme.primary.withOpacity(0.1),
+          child: Icon(Icons.music_note, color: theme.colorScheme.primary),
+        ),
+        title: Text(song.title, style: theme.textTheme.titleMedium?.copyWith(fontWeight: isCurrentlyPlaying ? FontWeight.bold : FontWeight.normal)),
+        subtitle: Text(song.author),
+        trailing: trailingWidget,
+        onTap: () => _startOrPlaySong(song),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     if (_isLoading) {
       return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
-        ),
+        body: Center(child: CircularProgressIndicator()),
       );
     }
 
@@ -110,7 +256,8 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text('Error: $_error'),
+              Text('Error: $_error', textAlign: TextAlign.center),
+              const SizedBox(height: 16),
               ElevatedButton(
                 onPressed: _initializeApp,
                 child: const Text('Reintentar'),
@@ -127,7 +274,6 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Column(
           children: [
             const SizedBox(height: 24),
-            // Logo y título
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -144,7 +290,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
             const SizedBox(height: 16),
-            if (_audioService.currentSong != null)
+            if (_currentPlayingSong != null)
               Container(
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 padding: const EdgeInsets.all(16),
@@ -162,56 +308,63 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Column(
                   children: [
                     Text(
-                      _audioService.currentSong!.title,
+                      _currentPlayingSong!.title,
                       style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                      textAlign: TextAlign.center,
                     ),
                     Text(
-                      _audioService.currentSong!.author,
+                      _currentPlayingSong!.author,
                       style: theme.textTheme.titleMedium,
+                      textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Text(_formatDuration(_currentPosition)),
-                        Expanded(
-                          child: Slider(
-                            value: _currentPosition.inSeconds.toDouble(),
-                            max: _totalDuration?.inSeconds.toDouble() ?? 0,
-                            onChanged: (value) {
-                              _audioService.seekTo(
-                                Duration(seconds: value.toInt()),
-                              );
-                            },
+                    if (_totalDuration != null)
+                      Row(
+                        children: [
+                          Text(_formatDuration(_currentPosition)),
+                          Expanded(
+                            child: Slider(
+                              value: _currentPosition.inSeconds.toDouble().clamp(0.0, _totalDuration!.inSeconds.toDouble()),
+                              max: _totalDuration!.inSeconds.toDouble(),
+                              onChanged: (value) {
+                                _audioService.seekTo(Duration(seconds: value.toInt()));
+                              },
+                            ),
                           ),
-                        ),
-                        Text(_formatDuration(_totalDuration ?? Duration.zero)),
-                      ],
-                    ),
+                          Text(_formatDuration(_totalDuration ?? Duration.zero)),
+                        ],
+                      ),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         IconButton(
                           icon: Icon(
-                            _audioService.isPlaying ? Icons.pause_circle : Icons.play_circle,
-                            size: 40,
+                            _isPlaying ? Icons.pause_circle_filled : Icons.play_circle_filled,
+                            size: 48,
                             color: theme.colorScheme.primary,
                           ),
                           onPressed: () {
-                            if (_audioService.isPlaying) {
+                            if (_isPlaying) {
                               _audioService.pause();
                             } else {
-                              _audioService.play(_audioService.currentSong!);
+                              if (_currentPlayingSong != null) {
+                                _audioService.play(_currentPlayingSong!);
+                              }
                             }
-                            setState(() {});
+                          },
+                        ),
+                        IconButton(
+                          icon: Icon(Icons.stop_circle_outlined, size: 48, color: theme.colorScheme.secondary),
+                          onPressed: () {
+                            _audioService.stop();
                           },
                         ),
                         if (_isBuffering)
                           const Padding(
                             padding: EdgeInsets.all(8.0),
                             child: SizedBox(
-                              width: 24,
-                              height: 24,
-                              child: CircularProgressIndicator(),
+                              width: 24, height: 24,
+                              child: CircularProgressIndicator(strokeWidth: 2),
                             ),
                           ),
                       ],
@@ -220,84 +373,26 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             Expanded(
-              child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 8),
-                child: ListView.builder(
-                  itemCount: _songs.length,
-                  itemBuilder: (context, index) {
-                    final song = _songs[index];
-                    return Card(
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      elevation: 2,
-                      margin: const EdgeInsets.symmetric(vertical: 6),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: theme.colorScheme.primary.withOpacity(0.1),
-                          child: Icon(Icons.music_note, color: theme.colorScheme.primary),
-                        ),
-                        title: Text(song.title, style: theme.textTheme.titleMedium),
-                        subtitle: Text(song.author),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (song.isDownloading)
-                              SizedBox(
-                                width: 24,
-                                height: 24,
-                                child: CircularProgressIndicator(
-                                  value: song.downloadProgress,
-                                ),
-                              )
-                            else if (!song.isDownloaded)
-                              IconButton(
-                                icon: const Icon(Icons.download),
-                                onPressed: () => _downloadSong(song),
-                              ),
-                            IconButton(
-                              icon: Icon(
-                                _audioService.currentSong?.url == song.url &&
-                                        _audioService.isPlaying
-                                    ? Icons.pause
-                                    : Icons.play_arrow,
-                              ),
-                              onPressed: () {
-                                if (_audioService.currentSong?.url == song.url &&
-                                    _audioService.isPlaying) {
-                                  _audioService.pause();
-                                } else {
-                                  _audioService.play(song);
-                                }
-                                setState(() {});
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
+              child: _songs.isEmpty
+                  ? Center(child: Text('No hay canciones en la playlist.', style: theme.textTheme.bodyLarge))
+                  : ListView.builder(
+                      itemCount: _songs.length,
+                      itemBuilder: (context, index) {
+                        final song = _songs[index];
+                        return _buildSongListItem(song, theme);
+                      },
+                    ),
             ),
             Padding(
-              padding: const EdgeInsets.only(bottom: 16, top: 8),
+              padding: const EdgeInsets.all(12.0),
               child: Text(
-                'diseñado por AC y WR',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.primary,
-                  fontWeight: FontWeight.w500,
-                  letterSpacing: 1.2,
-                ),
+                'Diseñado por AC y WR',
+                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurface.withOpacity(0.6)),
               ),
             ),
           ],
         ),
       ),
     );
-  }
-
-  @override
-  void dispose() {
-    _audioService.dispose();
-    super.dispose();
   }
 } 

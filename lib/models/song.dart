@@ -3,6 +3,7 @@ class Song {
   final String title;
   final String author;
   final String url;
+  final String duration;
   final String? coverUrl;
   double downloadProgress;
   bool isDownloading;
@@ -13,6 +14,7 @@ class Song {
     required this.title,
     required this.author,
     required this.url,
+    required this.duration,
     this.coverUrl,
     this.downloadProgress = 0.0,
     this.isDownloading = false,
@@ -21,21 +23,20 @@ class Song {
 
   factory Song.fromJson(Map<String, dynamic> json) {
     return Song(
-      id: json['id'] as String,
+      id: json['title'] as String,
       title: json['title'] as String,
       author: json['author'] as String,
       url: json['url'] as String,
-      coverUrl: json['coverUrl'] as String?,
+      duration: json['duration'] as String,
     );
   }
 
   Map<String, dynamic> toJson() {
     return {
-      'id': id,
       'title': title,
       'author': author,
       'url': url,
-      'coverUrl': coverUrl,
+      'duration': duration,
     };
   }
 } 

@@ -1,10 +1,26 @@
+import 'dart:convert';
 import 'dart:io';
+import 'package:http/http.dart' as http;
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:path_provider/path_provider.dart';
 import '../models/song.dart';
 
 class DownloadService {
   final DefaultCacheManager _cacheManager = DefaultCacheManager();
+  static const String _playlistUrl = 'https://www.rafaelamorim.com.br/mobile2/musicas/list.json';
+
+  Future<List<Song>> fetchPlaylist() async {
+    try {
+      final response = await http.get(Uri.parse(_playlistUrl));
+      if (response.statusCode == 200) {
+        final List<dynamic> jsonList = json.decode(response.body);
+        return jsonList.map((json) => Song.fromJson(json)).toList();
+      }
+      throw Exception('Error al cargar la playlist');
+    } catch (e) {
+      throw Exception('Error de conexión: $e');
+    }
+  }
 
   Future<void> downloadSong(Song song, Function(double) onProgress) async {
     try {
@@ -42,25 +58,6 @@ class DownloadService {
       song.downloadProgress = 0.0;
       rethrow;
     }
-  }
-
-  Future<List<Song>> fetchPlaylist() async {
-    // Aquí deberías implementar la lógica para obtener tu lista de reproducción
-    // Por ahora, retornaremos una lista de ejemplo
-    return [
-      Song(
-        id: '1',
-        title: 'Canción de ejemplo 1',
-        author: 'Artista 1',
-        url: 'https://example.com/song1.mp3',
-      ),
-      Song(
-        id: '2',
-        title: 'Canción de ejemplo 2',
-        author: 'Artista 2',
-        url: 'https://example.com/song2.mp3',
-      ),
-    ];
   }
 
   Future<void> cancelDownload(Song song) async {

@@ -224,7 +224,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                     title: Text(song.title),
-                    subtitle: Text(song.author),
+                    subtitle: Text('${song.author} • ${song.duration}'),
                     trailing: song.isDownloading
                         ? SizedBox(
                             width: 24,

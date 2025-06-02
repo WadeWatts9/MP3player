@@ -25,16 +25,22 @@ class MyApp extends StatelessWidget {
       child: MaterialApp(
         title: 'MP3 Player',
         theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: Colors.deepPurple,
-            brightness: Brightness.light,
-          ),
           useMaterial3: true,
+          colorScheme: ColorScheme.light(
+            primary: const Color(0xFF1E88E5), // Azul principal
+            onPrimary: Colors.white,
+            secondary: const Color(0xFF64B5F6), // Azul secundario
+            onSecondary: Colors.white,
+            surface: Colors.white,
+            background: Colors.white,
+            error: Colors.red,
+          ),
           appBarTheme: const AppBarTheme(
-            centerTitle: true,
+            backgroundColor: Color(0xFF1E88E5),
+            foregroundColor: Colors.white,
             elevation: 0,
           ),
-          cardTheme: CardThemeData(
+          cardTheme: const CardThemeData(
             elevation: 2,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.all(Radius.circular(12)),
@@ -42,16 +48,22 @@ class MyApp extends StatelessWidget {
           ),
         ),
         darkTheme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: Colors.deepPurple,
-            brightness: Brightness.dark,
-          ),
           useMaterial3: true,
+          colorScheme: ColorScheme.dark(
+            primary: const Color(0xFF1E88E5),
+            onPrimary: Colors.white,
+            secondary: const Color(0xFF64B5F6),
+            onSecondary: Colors.white,
+            surface: const Color(0xFF121212),
+            background: const Color(0xFF121212),
+            error: Colors.red,
+          ),
           appBarTheme: const AppBarTheme(
-            centerTitle: true,
+            backgroundColor: Color(0xFF1E88E5),
+            foregroundColor: Colors.white,
             elevation: 0,
           ),
-          cardTheme: CardThemeData(
+          cardTheme: const CardThemeData(
             elevation: 2,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.all(Radius.circular(12)),
